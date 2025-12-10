@@ -1,6 +1,17 @@
 import feedparser
 from datetime import datetime, timedelta, UTC
 from youtube_transcript_api import YouTubeTranscriptApi, NoTranscriptFound
+from pydantic import BaseModel, HttpUrl
+
+class ChannelVideo(BaseModel):
+    id: str
+    title: str
+    url: HttpUrl
+    published: datetime
+    transcript: str | None = None
+
+class Transcript(BaseModel):
+    text: str
 
 class YouTubeScraperService:
     def get_channel_id(self, channel_url: str) -> str:
@@ -12,7 +23,7 @@ class YouTubeScraperService:
         else:
             raise ValueError("Invalid YouTube channel URL format.")
 
-    def get_latest_videos(self, channel_id: str, timeframe_hours: int = 24) -> list[dict]:
+    def get_latest_videos(self, channel_id: str, timeframe_hours: int = 24) -> list[ChannelVideo]:
         """Fetches the latest videos from a YouTube channel's RSS feed, filtered by timeframe."""
         base_url = "https://www.youtube.com/feeds/videos.xml?channel_id="
         feed_url = f"{base_url}{channel_id}"
@@ -29,7 +40,7 @@ class YouTubeScraperService:
                 video_id = entry.yt_videoid
                 video_url = entry.link
                 title = entry.title
-                latest_videos.append({"id": video_id, "title": title, "url": video_url, "published": published_date})
+                latest_videos.append(ChannelVideo(id=video_id, title=title, url=video_url, published=published_date))
         return latest_videos
 
     def get_transcript(self, video_id: str) -> str | None:
@@ -46,33 +57,14 @@ class YouTubeScraperService:
             print(f"Error fetching transcript for video ID {video_id}: {e}")
             return None
 
-    def get_videos_with_transcripts(self, channel_id: str, timeframe_hours: int = 24) -> list[dict]:
+    def get_videos_with_transcripts(self, channel_id: str, timeframe_hours: int =100) -> list[ChannelVideo]:
         """Fetches latest videos and their transcripts for a given channel ID and timeframe."""
-        recent_videos = self.get_latest_videos(channel_id, timeframe_hours)
-        videos_with_transcripts = []
-        for video in recent_videos:
-            transcript = self.get_transcript(video["id"])
-            if transcript:
-                video["transcript"] = transcript
-                videos_with_transcripts.append(video)
+        recent_videos_raw = self.get_latest_videos(channel_id, timeframe_hours)
+        videos_with_transcripts: list[ChannelVideo] = []
+        for video_item in recent_videos_raw:
+            transcript_content = self.get_transcript(video_item.id)
+            if transcript_content:
+                videos_with_transcripts.append(ChannelVideo(id=video_item.id, title=video_item.title, url=video_item.url, published=video_item.published, transcript=transcript_content))
+            else:
+                videos_with_transcripts.append(video_item) # Append without transcript if not found
         return videos_with_transcripts
-
-if __name__ == "__main__":
-    # Example Usage for the YouTubeScraperService
-    service = YouTubeScraperService()
-    channel_id_example = "UCXZCJLdBC09xxGZ6gcdrc6A" # Example Channel ID
-
-    print(f"[Service] Fetching videos and transcripts for channel ID: {channel_id_example}")
-    videos_data = service.get_videos_with_transcripts(channel_id_example, timeframe_hours=48) # Check last 48 hours for demo
-
-    if videos_data:
-        print(f"[Service] Found {len(videos_data)} recent videos with transcripts:")
-        for video in videos_data:
-            print(f"- Title: {video['title']}")
-            print(f"  URL: {video['url']}")
-            print(f"  Video ID: {video['id']}")
-            print(f"  Published: {video['published']}")
-            print(f"  Transcript Snippet: {video['transcript'][:200]}...") # Print first 200 chars
-            print("\n" + "-"*50 + "\n")
-    else:
-        print("[Service] No recent videos with transcripts found in the last 48 hours.")
